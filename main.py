@@ -8,10 +8,14 @@ on_disconnect = lambda device_id, device_info: print(f"Disconnected: {device_inf
 
 # Create the USBMonitor instance
 monitor = USBMonitor()
+devices_dict = monitor.get_available_devices()
+
+for device_id, device_info in devices_dict.items():
+    print(f"{device_id} -- {device_info['ID_MODEL']} ({device_info['ID_MODEL_ID']} - {device_info['ID_VENDOR_ID']})")
 
 # Start the daemon
 monitor.start_monitoring(on_connect=on_connect, on_disconnect=on_disconnect)
-print(monitor.get_available_devices())
+
 # Keep the main thread alive to allow the monitoring to continue
 try:
     while True:
@@ -19,6 +23,5 @@ try:
 except KeyboardInterrupt:
     print("Stopping USB monitor...")
     monitor.stop_monitoring()
-
 
 
