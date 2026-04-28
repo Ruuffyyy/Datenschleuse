@@ -1,4 +1,4 @@
-mport pyudev
+import pyudev
 import os
 import subprocess
 import serial
