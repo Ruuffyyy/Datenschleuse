@@ -1,9 +1,38 @@
-
-import pyudev
+mport pyudev
 import os
 import subprocess
+import serial
+import time
 
 context = pyudev.Context()
+
+SERIAL_PORT = "/dev/ttyACM0"
+BAUDRATE = 115200
+
+esp = None
+
+def connect_esp():
+    global esp
+    try:
+        esp = serial.Serial(SERIAL_PORT, BAUDRATE, timeout=1)
+        time.sleep(2)
+        return True
+    except Exception as e:
+        print("ESP Verbindung fehlgeschlagen:", e)
+        esp = None
+        return False
+
+
+def send_to_esp(text: str):
+    global esp
+    if esp is None or not esp.is_open:
+        if not connect_esp():
+            return
+    try:
+        esp.write((text + "\n").encode("utf-8", errors="replace"))
+        esp.flush()
+    except Exception as e:
+        print("Senden an ESP fehlgeschlagen:", e)
 
 
 def printConnectedUsbHubs():
@@ -13,33 +42,38 @@ def printConnectedUsbHubs():
         maxchild = int(device.attributes.get('maxchild', 0))
         model = device.get('ID_MODEL')
 
-        if (maxchild == 0 or model.find("Hub") < 0):
+        if model is None:
             continue
+        if maxchild == 0 or "Hub" not in model:
+            continue
+
         names = []
 
         def createChildName(port: int, model: str):
-            return "port %s: %s" % (port, model)
+            return f"port {port}: {model}"
 
         for i in range(maxchild):
             names.append(createChildName(i + 1, "Empty"))
+
         for child in device.children:
             if child.subsystem == "usb" and child.device_type == "usb_device":
-                sys_name = child.sys_name  # e.g. "1-2.3.4"
+                sys_name = child.sys_name
 
-                # Extract the port number (last segment after '.')
                 if '.' in sys_name:
                     port = sys_name.split('.')[-1]
                 else:
-                    # Directly connected to root hub (no dot case like "1-2")
                     port = sys_name.split('-')[-1]
 
-                model = child.get('ID_MODEL')
-                names[int(port) - 1] = createChildName(port, model)
+                child_model = child.get('ID_MODEL') or "Unknown"
+                try:
+                    names[int(port) - 1] = createChildName(port, child_model)
+                except:
+                    pass
 
-        text = text + "\n%s -> %s" % (device.get('ID_MODEL'), maxchild)
+        text += f"\n{device.get('ID_MODEL')} -> {maxchild}"
         for name in names:
-            text = text + "\n" + " " * 4 + name
-    return text
+            text += "\n    " + name
+    return text.strip()
 
 
 def get_script_dir():
@@ -57,13 +91,10 @@ def createMountDir(dev_node: str):
 
 def mountDevice(dev_node: str, mount_point: str):
     try:
-        subprocess.run(
-            ["mount", dev_node, mount_point],
-            check=True
-        )
+        subprocess.run(["mount", dev_node, mount_point], check=True)
         return True
     except subprocess.CalledProcessError as e:
-        print("Mount failed: ", e)
+        print("Mount failed:", e)
         return False
 
 
@@ -72,38 +103,52 @@ def startObserver():
     monitor.filter_by(subsystem="block")
 
     def log_event(action, device):
-        if (action != "add" and action != "remove"):
+        if action not in ("add", "remove"):
             return
         if device.device_type != "partition":
             return
         if device.get('ID_BUS') != 'usb':
             return
 
-        text = printConnectedUsbHubs()
-        # os.system('cls' if os.name == 'nt' else 'clear')
-        # print(action, device, text)
+        hub_text = printConnectedUsbHubs()
         dev_node = device.device_node
-        if (action == "add"):
-            print(dev_node)
-            mountDir = createMountDir(dev_node)
-            if (not mountDevice(dev_node, mountDir)):
+
+        if action == "add":
+            mount_dir = createMountDir(dev_node)
+            if not mountDevice(dev_node, mount_dir):
+                msg = f"USB erkannt: {dev_node}\nMount fehlgeschlagen"
+                print(msg)
+                send_to_esp(msg)
                 return
-            for f in os.listdir(mountDir):
-                print("File: %s" % f)
+
+            files = os.listdir(mount_dir)
+            file_text = "\n".join([f"File: {f}" for f in files[:15]])
+            msg = f"USB erkannt: {dev_node}\n\nHubs:\n{hub_text}\n\nDateien:\n{file_text}"
+            print(msg)
+            send_to_esp(msg)
+
+        elif action == "remove":
+            msg = f"USB entfernt: {dev_node}"
+            print(msg)
+            send_to_esp(msg)
 
     observer = pyudev.MonitorObserver(monitor, log_event)
     observer.start()
     return observer
 
 
-# Keep the main thread alive to allow the monitoring to continue
-if (__name__ == "__main__"):
-    os.system('cls' if os.name == 'nt' else 'clear')
-    print(printConnectedUsbHubs())
+if __name__ == "__main__":
+    connect_esp()
+    start_text = printConnectedUsbHubs()
+    print(start_text)
+    send_to_esp("USB Monitor gestartet\n\n" + start_text)
+
     observer = startObserver()
     try:
         while True:
-            pass
+            time.sleep(0.2)
     except KeyboardInterrupt:
         print("Stopping USB monitor...")
         observer.stop()
+        if esp and esp.is_open:
+            esp.close()
