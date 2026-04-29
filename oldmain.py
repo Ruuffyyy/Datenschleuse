@@ -112,7 +112,8 @@ def archiveMountedDevice(mount_point: str, archive_format: str = "zip"):
     return shutil.make_archive(
         archive_base_name,
         archive_format,
-        root_dir=mount_point
+        root_dir=mount_point,
+        base_dir="."
     )
 
 # Keep the main thread alive to allow the monitoring to continue
