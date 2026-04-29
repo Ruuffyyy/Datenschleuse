@@ -1,7 +1,8 @@
 import pyudev
 import os
 import subprocess
-import shutil
+import zipfile
+import tarfile
 from datetime import datetime
 
 context = pyudev.Context()
@@ -25,13 +26,11 @@ def printConnectedUsbHubs():
             names.append(createChildName(i + 1, "Empty"))
         for child in device.children:
             if child.subsystem == "usb" and child.device_type == "usb_device":
-                sys_name = child.sys_name  # e.g. "1-2.3.4"
+                sys_name = child.sys_name
 
-                # Extract the port number (last segment after '.')
                 if '.' in sys_name:
                     port = sys_name.split('.')[-1]
                 else:
-                    # Directly connected to root hub (no dot case like "1-2")
                     port = sys_name.split('-')[-1]
 
                 model = child.get('ID_MODEL')
@@ -68,6 +67,67 @@ def mountDevice(dev_node: str, mount_point: str):
         return False
 
 
+def archiveMountedDevice(mount_point: str, archive_format: str = "zip", recursive: bool = True):
+    script_dir = get_script_dir()
+    archive_base_dir = os.path.join(script_dir, "archives")
+    os.makedirs(archive_base_dir, exist_ok=True)
+
+    if archive_format not in ("zip", "tar", "gztar"):
+        raise ValueError("archive_format muss zip, tar oder gztar sein")
+
+    folder_name = os.path.basename(mount_point.rstrip("/"))
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    extension_map = {"zip": ".zip", "tar": ".tar", "gztar": ".tar.gz"}
+    archive_name = os.path.join(archive_base_dir, f"{folder_name}_{timestamp}{extension_map[archive_format]}")
+
+    SKIP_PREFIXES = (".", "$", "System Volume Information")
+
+    def should_skip(name: str) -> bool:
+        return any(name.startswith(p) for p in SKIP_PREFIXES)
+
+    def collect_files() -> list[tuple[str, str]]:
+        files = []
+        if recursive:
+            for dirpath, dirnames, filenames in os.walk(mount_point):
+                dirnames[:] = [d for d in dirnames if not should_skip(d)]
+                for filename in filenames:
+                    if should_skip(filename):
+                        continue
+                    full_path = os.path.join(dirpath, filename)
+                    arcname = os.path.relpath(full_path, mount_point)
+                    files.append((full_path, arcname))
+        else:
+            for filename in os.listdir(mount_point):
+                if should_skip(filename):
+                    continue
+                full_path = os.path.join(mount_point, filename)
+                if os.path.isfile(full_path):
+                    files.append((full_path, filename))
+        return files
+
+    files = collect_files()
+
+    if archive_format == "zip":
+        with zipfile.ZipFile(archive_name, "w", zipfile.ZIP_DEFLATED) as zf:
+            for full_path, arcname in files:
+                try:
+                    zf.write(full_path, arcname)
+                except (PermissionError, OSError) as e:
+                    print(f"Überspringe {full_path}: {e}")
+
+    elif archive_format in ("tar", "gztar"):
+        mode = "w:gz" if archive_format == "gztar" else "w"
+        with tarfile.open(archive_name, mode) as tf:
+            for full_path, arcname in files:
+                try:
+                    tf.add(full_path, arcname=arcname)
+                except (PermissionError, OSError) as e:
+                    print(f"Überspringe {full_path}: {e}")
+
+    return archive_name
+
+
 def startObserver():
     monitor = pyudev.Monitor.from_netlink(context)
     monitor.filter_by(subsystem="block")
@@ -89,34 +149,14 @@ def startObserver():
             mountDir = createMountDir(dev_node)
             if (not mountDevice(dev_node, mountDir)):
                 return
-            archive_path = archiveMountedDevice(mountDir, "zip")
-            print("Archiv erstellt:", archive_path)
-
+            for fmt in ("zip", "tar", "gztar"):  # <-- alle drei Formate
+                archive_path = archiveMountedDevice(mountDir, fmt)
+                print("Archiv erstellt:", archive_path)
 
     observer = pyudev.MonitorObserver(monitor, log_event)
     observer.start()
     return observer
 
-def archiveMountedDevice(mount_point: str, archive_format: str = "zip"):
-    script_dir = get_script_dir()
-    archive_base_dir = os.path.join(script_dir, "archives")
-    os.makedirs(archive_base_dir, exist_ok=True)
-
-    folder_name = os.path.basename(mount_point.rstrip("/"))
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    archive_base_name = os.path.join(archive_base_dir, f"{folder_name}_{timestamp}")
-
-    if archive_format not in ("zip", "tar", "gztar"):
-        raise ValueError("archive_format muss zip, tar oder gztar sein")
-
-    return shutil.make_archive(
-        archive_base_name,
-        archive_format,
-        root_dir=mount_point,
-        base_dir="."
-    )
-
-# Keep the main thread alive to allow the monitoring to continue
 if (__name__ == "__main__"):
     os.system('cls' if os.name == 'nt' else 'clear')
     print(printConnectedUsbHubs())
