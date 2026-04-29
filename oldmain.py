@@ -1,6 +1,7 @@
 import pyudev
 import os
 import subprocess
+import shutil
 import zipfile
 import tarfile
 from datetime import datetime
@@ -64,6 +65,18 @@ def mountDevice(dev_node: str, mount_point: str):
         return True
     except subprocess.CalledProcessError as e:
         print("Mount failed: ", e)
+        return False
+
+
+def unmountDevice(mount_point: str):
+    try:
+        subprocess.run(
+            ["umount", mount_point],
+            check=True
+        )
+        return True
+    except subprocess.CalledProcessError as e:
+        print("Unmount failed: ", e)
         return False
 
 
@@ -144,18 +157,25 @@ def startObserver():
         os.system('cls' if os.name == 'nt' else 'clear')
         print(action, device, text)
         dev_node = device.device_node
+        mountDir = createMountDir(dev_node)
+
         if (action == "add"):
             print(dev_node)
-            mountDir = createMountDir(dev_node)
             if (not mountDevice(dev_node, mountDir)):
                 return
-            for fmt in ("zip", "tar", "gztar"):  # <-- alle drei Formate
+            for fmt in ("zip", "tar", "gztar"):
                 archive_path = archiveMountedDevice(mountDir, fmt)
                 print("Archiv erstellt:", archive_path)
+            unmountDevice(mountDir)
+            print("Stick kann sicher entfernt werden")
+
+        if (action == "remove"):
+            unmountDevice(mountDir)
 
     observer = pyudev.MonitorObserver(monitor, log_event)
     observer.start()
     return observer
+
 
 if (__name__ == "__main__"):
     os.system('cls' if os.name == 'nt' else 'clear')
