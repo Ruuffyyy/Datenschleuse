@@ -1,6 +1,8 @@
 import pyudev
 import os
 import subprocess
+import shutil
+from datetime import datetime
 
 context = pyudev.Context()
 
@@ -87,13 +89,31 @@ def startObserver():
             mountDir = createMountDir(dev_node)
             if (not mountDevice(dev_node, mountDir)):
                 return
-            for f in os.listdir(mountDir):
-                print("File: %s" % f)
+            archive_path = archiveMountedDevice(mountDir, "zip")
+            print("Archiv erstellt:", archive_path)
+
 
     observer = pyudev.MonitorObserver(monitor, log_event)
     observer.start()
     return observer
 
+def archiveMountedDevice(mount_point: str, archive_format: str = "zip"):
+    script_dir = get_script_dir()
+    archive_base_dir = os.path.join(script_dir, "archives")
+    os.makedirs(archive_base_dir, exist_ok=True)
+
+    folder_name = os.path.basename(mount_point.rstrip("/"))
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    archive_base_name = os.path.join(archive_base_dir, f"{folder_name}_{timestamp}")
+
+    if archive_format not in ("zip", "tar", "gztar"):
+        raise ValueError("archive_format muss zip, tar oder gztar sein")
+
+    return shutil.make_archive(
+        archive_base_name,
+        archive_format,
+        root_dir=mount_point
+    )
 
 # Keep the main thread alive to allow the monitoring to continue
 if (__name__ == "__main__"):
