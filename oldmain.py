@@ -1,12 +1,13 @@
 import pyudev
 import os
 import subprocess
-import shutil
 import zipfile
 import tarfile
 from datetime import datetime
 
 context = pyudev.Context()
+
+ARCHIVE_FORMAT = "zip"  # "zip", "tar" oder "gztar"  <-- HIER ÄNDERN
 
 
 def printConnectedUsbHubs():
@@ -163,9 +164,8 @@ def startObserver():
             print(dev_node)
             if (not mountDevice(dev_node, mountDir)):
                 return
-            for fmt in ("zip", "tar", "gztar"):
-                archive_path = archiveMountedDevice(mountDir, fmt)
-                print("Archiv erstellt:", archive_path)
+            archive_path = archiveMountedDevice(mountDir, ARCHIVE_FORMAT)
+            print("Archiv erstellt:", archive_path)
             unmountDevice(mountDir)
             print("Stick kann sicher entfernt werden")
 
