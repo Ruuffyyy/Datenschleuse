@@ -79,8 +79,8 @@ def startObserver():
             return
 
         text = printConnectedUsbHubs()
-        # os.system('cls' if os.name == 'nt' else 'clear')
-        # print(action, device, text)
+        os.system('cls' if os.name == 'nt' else 'clear')
+        print(action, device, text)
         dev_node = device.device_node
         if (action == "add"):
             print(dev_node)
